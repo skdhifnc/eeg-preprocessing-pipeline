@@ -67,6 +67,7 @@
 BCI-2.0/
 ├── config.example.py                 # 可公开的完整配置模板
 ├── config.py                         # 本地配置，由模板复制后填写，不公开个人路径
+├── requirements.txt                  # 已验证环境的直接依赖及版本
 ├── EEG_preprocessing.py              # 阶段 1 + 阶段 2
 ├── eeg_reference.py                  # 坏通道检测、插值和平均参考辅助逻辑
 ├── ICA_processing.py                 # 阶段 3：ICA 和人工审核
@@ -90,19 +91,29 @@ BCI-2.0/
 
 已验证的运行环境为：
 
-- Python 3.9
-- MNE 1.8
+- Python 3.9（验证时为 3.9.25）
+- MNE 1.8.0
 - Windows
-- 项目使用的主要库：`numpy`、`h5py`、`mne`、`matplotlib`、`scipy`、
-  `scikit-learn`
+- 项目的直接依赖及验证过的版本见 `requirements.txt`；除科学计算和分类库外，
+  代码还直接使用 `joblib`、`threadpoolctl`。
 
-请选择或激活已经安装上述依赖的 Python 环境，再确认当前解释器版本：
+安装 Python 3.9 后，在项目根目录打开 **Windows CMD**，创建独立环境并安装依赖：
 
 ```bat
 python --version
+python -m venv .venv
+.venv\Scripts\activate.bat
+python -m pip install -r requirements.txt
+python -m pip check
 ```
 
-下文统一使用 `python`，不依赖特定的 Conda 环境名称或本机安装目录。
+请确认第一行显示 Python 3.9，再创建环境；如系统有多个 Python 版本，
+应先选择 Python 3.9 解释器。以后重新打开终端，先执行
+`.venv\Scripts\activate.bat`；其他操作系统或 Conda 用户也可在对应环境中执行
+`python -m pip install -r requirements.txt`。下文统一使用当前环境的 `python`。
+这是已验证的直接依赖版本清单，而不是整个本机 Conda 环境的锁文件；
+间接依赖由 pip 解析安装，不保证跨操作系统的二进制环境完全一致。
+安装依赖也不会提供原始 EEG 数据，完整流水线仍需自备符合格式的输入文件。
 
 ### 3.2 从模板创建本地配置
 
