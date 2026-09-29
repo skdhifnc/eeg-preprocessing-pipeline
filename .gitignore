@@ -1,0 +1,64 @@
+# Local configuration and private documentation
+/config.py
+/README.local.md
+/README.public.md
+
+# EEG inputs, processing outputs and acquisition metadata
+/data/
+/dataset/
+/cache/
+/reports/
+/CSP_result/
+/acquisition_desc.xml
+/asynchron_signal_types.xml
+*.fif
+*.fif.gz
+*.hdf5
+*.h5
+*.mat
+*.edf
+*.bdf
+*.npy
+*.npz
+*.pkl
+*.pickle
+*.joblib
+
+# Python environments, bytecode and tool caches
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Personal editor settings and temporary files
+.idea/
+.vscode/
+*.log
+*.tmp
+*.bak
+*.swp
+~$*
+Thumbs.db
+.DS_Store
+
+# Credentials; only deliberately sanitized examples may be tracked
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+id_rsa
+id_ed25519
+.git-credentials
