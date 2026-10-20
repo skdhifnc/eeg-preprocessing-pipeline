@@ -181,6 +181,18 @@ STAGE4_WS_TMAX = 4.0  # 分类窗口终点；实际边界会对齐到输入数�
 STAGE4_OUTPUT_UNIT = "microvolts"  # 支持 volts、millivolts、microvolts 或 nanovolts。
 STAGE4_OUTPUT_DTYPE = "float32"  # 任意 NumPy 浮点类型，例如 float32 或 float64。
 
+# FBCSP：从同一份阶段 3 ICA clean 连续 Raw 生成的独立四维分类输入。
+# 每个频带仍在分类阶段的训练折内独立拟合 CSP；这里仅做无标签滤波和 Epoch 导出。
+FBCSP_BANDS: tuple[tuple[float, float], ...] = (
+    (8.0, 12.0), (12.0, 16.0), (16.0, 20.0),
+    (20.0, 24.0), (24.0, 30.0),
+)
+FBCSP_FULL_OUTPUT_PATH = PROJECT_ROOT / "cache" / "stage4_fbcsp_epochs_full.hdf5"
+FBCSP_WS_OUTPUT_PATH = PROJECT_ROOT / "cache" / "stage4_fbcsp_epochs_ws.hdf5"
+FBCSP_REPORT_PATH = PROJECT_ROOT / "reports" / "stage4_fbcsp_epoch_report.json"
+FBCSP_BASELINE_OUTPUT_PATH = PROJECT_ROOT / "cache" / "stage4_fbcsp_baseline_ws.hdf5"
+FBCSP_OVERWRITE = False  # 显式允许后才覆盖新实验输入；绝不覆盖原 CSP 产物。
+
 
 
 def get_input_indices() -> tuple[int, ...]:

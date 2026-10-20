@@ -8,7 +8,13 @@
 > 原始数据、个人配置、采集 XML、缓存和实验报告不随源码发布，由 `.gitignore` 排除。
 
 本项目将采集设备导出的原始 HDF5 EEG 数据，处理为经过人工 ICA 审核、完成
-坏试次（Epoch）质量控制、可以被 `ws.py` 读取的分类输入数据。
+坏试次（Epoch）质量控制的分类输入数据，并提供单频带 CSP-SVM、多频带
+FBCSP-SVM、嵌套交叉验证与 Epoch 标签置换检验。
+
+当前 FBCSP 方法为 **grouped-concat 内层搜索**：保留 MNE `cov_est="concat"`，
+在训练折内复用同一正则化参数的 CSP 拟合，不使用磁盘变换缓存；默认网格为
+**12 个候选、外层 10 折 × 内层 5 折**。完整操作说明见 [FBCSP 专项指南](FBCSP_GUIDE.md)，
+快速运行与置换命令见第 9.2 节。
 
 项目的正式数据链路如下：
 
@@ -24,8 +30,11 @@
     ├─ 阶段 3：ICA 拟合 → 人工审核 → 预览 → 正式应用
     │          输出：ICA 模型、清单、审核凭据和 clean Raw FIF
     │
-    └─ 阶段 4：连续 8–30 Hz 带通；事件分段；拒绝坏 Epoch；导出双 HDF5 和报告
-               输出：完整审核 HDF5、ws 分类 HDF5、JSON 审核报告
+    └─ 阶段 4（两条独立分支，均读取同一份 ICA clean Raw）
+         ├─ EEG_processing.py：连续 8–30 Hz 带通；Epoch QC；双 HDF5 和报告
+         │    └─ main.py → 单频带 CSP-SVM → permutation.py
+         └─ fbcsp_stage4.py：五个子带与同源宽带 baseline；对齐 Epoch；独立发布
+              └─ fbcsp_main.py → FBCSP-SVM + 配对 CSP → fbcsp_permutation.py
 ```
 
 > **重要：** 阶段 1 和阶段 2 当前由 `EEG_preprocessing.py` 的一次 `main()`
@@ -64,7 +73,7 @@
 ## 2. 目录结构
 
 ```text
-BCI-2.0/
+eeg-preprocessing-pipeline/
 ├── config.example.py                 # 可公开的完整配置模板
 ├── config.py                         # 本地配置，由模板复制后填写，不公开个人路径
 ├── requirements.txt                  # 已验证环境的直接依赖及版本
@@ -73,9 +82,18 @@ BCI-2.0/
 ├── ICA_processing.py                 # 阶段 3：ICA 和人工审核
 ├── EEG_processing.py                 # 阶段 4：滤波、Epoch 和 HDF5 发布
 ├── ws.py                             # clean HDF5 校验及 CSP + SVM 分类函数
+├── main.py                           # 单频带 CSP 分类入口（会覆盖其既有结果）
+├── permutation.py                    # 单频带 CSP 置换检验入口
+├── fbcsp_stage4.py                    # 多频带阶段 4 与同源宽带 baseline 发布
+├── fbcsp.py                           # FBCSP 变换器、grouped 搜索及嵌套 CV
+├── fbcsp_main.py                      # FBCSP 与配对 CSP 分类入口
+├── fbcsp_permutation.py               # FBCSP 专用置换检验和断点续跑
+├── FBCSP_GUIDE.md                     # 方法、协议、运行与测试说明
 ├── processed_data_concatenation.py   # 已处理 HDF5 沿 Epoch 维拼接的独立工具
 ├── cache/                            # FIF、HDF5、ICA 模型和清单
 ├── reports/                          # ICA 审核报告和阶段 4 报告
+├── CSP_result/                       # 本地单频带实验结果，不上传
+├── FBCSP_result/                     # 本地多频带分类和置换结果，不上传
 ├── *_test.py                         # 阶段回归测试
 └── 其他工具脚本                      # HDF5、XML、映射和 EEG 查看工具
 ```
@@ -649,20 +667,21 @@ sampling_rate: HDF5 属性
 
 | 参数 | 候选值 |
 | --- | --- |
-| `csp__reg` | `0.05, 0.1, 0.2, 0.4, "ledoit_wolf", "oas"` |
+| `csp__reg` | `0.1, "ledoit_wolf"` |
 | `csp__n_components` | `2, 4` |
-| `csp__log` | `False, True` |
+| `csp__log` | `True` |
 | `svm__C` | `0.1, 1.0, 10.0` |
 
 固定 `csp__norm_trace=False`、SVM `kernel="linear"`。MNE 的 `log=False` 分支
 使用训练数据的统计量标准化平均功率，并非单纯输出原始功率；两分支后均保留
-Pipeline 中的 `StandardScaler`。32 通道时共 72 个候选，默认执行 3600 次内层
+Pipeline 中的 `StandardScaler`。32 通道时共 12 个候选，默认 reference 执行 600 次内层
 Pipeline 拟合和 10 次外层训练集重拟合，计算量明显高于单层交叉验证。
 默认 `n_jobs=1`；底层数学库线程默认限制为每进程2个，MNE只输出WARNING及以上日志。
 可显式设为2或4个进程，但需要更多内存，不建议直接使用 `-1`。
 `train_test` / `nested_cv` 支持 `cache_transformers=True`：只在相同训练子集、标签和
 CSP参数下复用变换，每个外层折使用独立临时缓存并及时删除，不跨置换共享。
-分类函数默认不缓存以兼容原有调用，置换入口默认开启缓存。
+分类函数默认不缓存以兼容原有调用；单频带置换仅在选择 reference 引擎时默认开启缓存，
+grouped 引擎不使用磁盘缓存。FBCSP 的缓存与搜索规则见第 9.2 节。
 
 默认成分候选会排除超过通道数的值；自定义网格中的非法成分数直接报错。
 不使用完整数据估计有效秩来调整网格。所有外层训练折的每类样本数都必须满足
@@ -711,19 +730,19 @@ ICA、人工审核等预处理移入折内，因此不代表整个原始 EEG 处
 
 ### 9.1 Epoch 级标签置换检验
 
-入口为 `permutation_test.py`。默认复用
+入口为 `permutation.py`（`permutation_test.py` 现在是合成数据测试，不是实验入口）。默认复用
 `CSP_result\classification_result\classification_result.mat`
 中的原始准确率（完整精度），**不会重新训练原始标签，也不覆盖分类结果**。
 必须先完成一次正式分类。先做只读校验（不拟合、不生成输出）：
 
 ```bat
-python permutation_test.py --validate-only
+python permutation.py --validate-only
 ```
 
 正式开始 100 次置换的命令如下；计算量很大，不会在测试期间自动启动：
 
 ```bat
-python permutation_test.py --n-permutations 100 --seed 42
+python permutation.py --n-permutations 100 --seed 42
 ```
 
 `--n-permutations` 默认100，`--seed` 默认42，`--n-jobs` 默认1（只并行内层网格搜索，
@@ -742,7 +761,7 @@ python permutation_test.py --n-permutations 100 --seed 42
 未变的 epoch、重复的标签排列或原始排列，不强制重抽。这符合有放回 Monte Carlo 抽样。
 输入 EEG 不变不代表 CSP 特征不变：CSP 依赖标签，必须重新拟合。
 
-每次使用 MAT 记录的实际折数和网格（通常10×5、72组），不复用原始最优参数。
+每次使用 MAT 记录的实际参数网格（当前默认为10×5、12组），而非只用原始最优参数；
 根据本次置换标签重新生成分层折，保持 `shuffle=False` 的划分规则，而不是冻结
 原始标签产生的具体索引；每次置换、每个训练折都会重新选择参数和拟合。
 grouped：同一个内层训练子集、标签和 reg 只拟合一次空间滤波器，再按各成分数
@@ -753,10 +772,10 @@ grouped：同一个内层训练子集、标签和 reg 只拟合一次空间滤�
 非log分支保留 MNE 的训练均值/标准差归一化及后续 StandardScaler。
 选择参数时严格维持 ParameterGrid 候选顺序、各内层折等权平均及并列首选规则。
 外层重拟合仍使用原 MNE CSP→StandardScaler→SVC Pipeline。
-分数仍为外层测试准确率的算术平均，72组参数全部保留。
-每次仍评估3600个内层候选/折组合及10次外层重拟合；默认网格下 grouped 的 CSP
-拟合数为10×(5×6+1)=310，SVM拟合次数不变。reference 无缓存为3610次，磁盘缓存
-理想命中约1210次。grouped 去除 EEG 哈希、缓存文件写入和按 C 重复的验证特征变换。
+统计量仍为外层测试准确率的等权平均，保存的实际网格全部保留。
+当前默认每次置换有600个内部选参/评分组合及10次外层重拟合，grouped 的 CSP
+拟合数为10×(5×2+1)=110，SVM拟合次数不变。reference 无缓存为610次；磁盘缓存
+只复用完全相同变换器参数。grouped 去除 EEG 哈希、临时文件写读和按 C 重复的验证数据变换。
 grouped 仅内层折并行，每个任务处理一个完整内层折，最多5个任务；外层及置换串行。
 不支持当前受限网格以外的 CSP 参数；不能未经验证扩展到其他 component_order/cov_est。
 每折打印耗时，每次置换记录耗时，并按本次进程已完成的置换估计剩余时间。
@@ -782,7 +801,7 @@ N=100 时最小可分辨 P 为1/101≈0.0099；需要更精细估计时应事先
 最终 P 值。支持显式 `--resume` 续跑（不是重新抽种子），例如：
 
 ```bat
-python permutation_test.py --resume CSP_result\permutation\YOUR_RUN_DIRECTORY\permutation_results.json --n-permutations 100 --seed 42 --n-jobs 1 --native-threads 2
+python permutation.py --resume CSP_result\permutation\YOUR_RUN_DIRECTORY\permutation_results.json --n-permutations 100 --seed 42 --n-jobs 1 --native-threads 2
 ```
 
 将 `YOUR_RUN_DIRECTORY` 替换为自己已有的运行子目录名；不要原样执行该示例。
@@ -812,6 +831,105 @@ python permutation_test.py --resume CSP_result\permutation\YOUR_RUN_DIRECTORY\pe
 不同被试/session/实验块或明显时间相关性，可能需要按实验设计限制的块内置换；
 本实现不自动推断分组。检验针对固定的已预处理 EEG 和此分类流程，不检验上游 ICA、
 人工筛选或事后反复选择时间窗/频带等步骤，也不自动校正多个实验的多重比较。
+
+---
+
+### 9.2 FBCSP-SVM 与配对 CSP（grouped-concat）
+
+此分支不替代原三维 CSP 输入。`fbcsp_stage4.py` 从正式阶段 3 ICA clean Raw
+分别生成 8–12、12–16、16–20、20–24、24–30 Hz 五个子带，以及同源 8–30 Hz
+宽带 baseline；各分支直接滤波，不先宽带再子带。参考分支执行 Epoch QC，
+各频带必须具有完全相同的标签、事件与试次顺序，否则拒绝发布。
+
+已有本地 `config.py` 的用户，应从模板补齐 `FBCSP_BANDS`、四个
+`FBCSP_*_PATH` 和 `FBCSP_OVERWRITE`，不要覆盖自己的路径或 ICA 审核配置。
+默认输出为：
+
+| 产物 | 项目根目录下的路径 |
+| --- | --- |
+| 完整审核窗口、四维多频带 EEG | `cache/stage4_fbcsp_epochs_full.hdf5` |
+| FBCSP 分类输入 | `cache/stage4_fbcsp_epochs_ws.hdf5` |
+| 同源宽带 CSP 分类输入 | `cache/stage4_fbcsp_baseline_ws.hdf5` |
+| 发布报告及文件 SHA-256 | `reports/stage4_fbcsp_epoch_report.json` |
+
+FBCSP 数据维度为 `(epochs, bands, channels, times)`。每带独立拟合 MNE CSP，
+将各带功率特征按带序拼接，再接 `StandardScaler → 线性 SVM`；不含 mRMR、PCA
+或自动频带选择。默认参数与上表相同，CSP 参数前缀改为 `fbcsp__`，其中
+`n_components=2/4` 指**每个频带**的成分数。
+
+**分组搜索与训练隔离：**每个内层训练折、每个 `reg`、每带只拟合一次 CSP，
+显式保持 `cov_est="concat"`；每带按候选成分数截取空间滤波器，再生成特征。
+每组 `(reg, n_components, log)` 独立提取特征并仅用训练特征拟合 Scaler，
+只在不同 SVM C 之间复用同组特征。选参后在完整外层训练集重拟合整个 Pipeline。
+这里的 grouped 指计算分组，**不是按被试/session 分组交叉验证**。
+默认五带共需 `10 × (5 × 2 × 5 + 5) = 550` 次带级 CSP 拟合（含外层重拟合）。
+不启用 Pipeline 磁盘缓存；`cache_transformers` 仅保留 API 兼容。
+Python API 的 `search_engine="reference"` 可运行无缓存 GridSearchCV 作等价对照。
+
+完成阶段 3 `apply` 后运行（无需先执行旧阶段 4）：
+
+```bat
+python fbcsp_stage4.py
+python fbcsp_main.py --n-jobs 1 --native-threads 2
+```
+
+`FBCSP_OVERWRITE=False` 默认拒绝覆盖已有阶段 4 输出。**若输入、设置和已发布
+文件未变，不必重跑阶段 3/4，直接重新分类即可。** 确需重新发布时，先审核输出路径
+再显式允许覆盖；新输入不能继续使用旧观测分类或旧置换检查点。
+
+分类默认在相同外层测试索引下同时评估 FBCSP 与同源宽带 CSP；可加
+`--fbcsp-only` 跳过配对模型。默认在 `FBCSP_result/` 创建 UTC 时间戳目录，
+也可用 `--output-dir` 指定尚不存在的新目录。保存：
+
+- `classification_result.json`：完整观测结果，最后发布，作为完成标记及置换输入；
+- `fbcsp_classification_result.mat`：准确率、各折分数和完整 JSON；
+- `results.txt`：文本摘要。
+
+JSON 包含各折索引、最优参数、预测、decision function、OOF 指标及配对准确率差。
+`accuracy` 是各外层折准确率的等权平均；`metrics.oof_accuracy` 是汇总全部测试
+预测后的准确率，折大小不等时两者可能不同。配对准确率差本身不代表统计显著。
+
+#### FBCSP 专用置换：先校验，再启动
+
+下例使用 CMD 环境变量；将 `OBSERVED` 改为实际新分类结果的 JSON 路径，
+将 `PERM_OUTPUT` 改为尚不存在的新目录。不要预先创建输出目录。
+
+```bat
+set "OBSERVED=FBCSP_result\your_classification_run\classification_result.json"
+set "PERM_OUTPUT=FBCSP_result\your_new_permutation_run"
+python fbcsp_permutation.py --observed "%OBSERVED%" --validate-only
+python fbcsp_permutation.py --observed "%OBSERVED%" --n-permutations 100 --seed 42 --output-dir "%PERM_OUTPUT%" --n-jobs 1 --native-threads 2
+```
+
+`--observed` 是必填参数；直接点击运行此脚本不会自动开始置换。
+`--validate-only` 只读检查观测结果、发布文件哈希、网格、划分及运行库版本，不训练。
+默认 `--n-permutations 100 --seed 42`，每次对 Epoch 标签全局置换，所有频带共享
+同一标签向量，并根据置换标签重新分层，完整重跑嵌套选参及 CSP/Scaler/SVM。
+固定无标签滤波不重跑，真实标签拟合的 CSP 不复用。
+
+检查点为置换目录中的 `permutation_results.json`，每完成一次置换即保存。
+中断后用**同一观测 JSON、总次数及 seed**续跑，不同时传 `--output-dir`：
+
+```bat
+python fbcsp_permutation.py --observed "%OBSERVED%" --resume "%PERM_OUTPUT%\permutation_results.json" --n-permutations 100 --seed 42 --n-jobs 1 --native-threads 2
+```
+
+检查点核验数据与观测哈希、协议、环境版本、网格和随机序列；残留 `.lock` 文件
+只能在确认没有运行进程后处理。当前协议分别为：
+
+- FBCSP：`nested_fbcsp_v2_grouped_concat`；
+- 配对 CSP：`nested_csp_paired_v2_grouped_concat`；
+- FBCSP 置换：`permutation_fbcsp_v2_grouped_concat`。
+
+历史 72 候选分类与旧 FBCSP 置换检查点不能用于本实验，不得修改协议标识后复用。
+单频带 `permutation.py` 的 MAT/检查点与此 JSON 入口也不能混用。
+
+单侧 Monte Carlo 检验采用 `p = (1 + 随机准确率 ≥ 观测准确率的次数) / (N + 1)`，
+包含并列值；100 次置换的最小可报告 p 值为 `1/101 ≈ 0.0099`，不是 0。
+置换次数应事先确定，不按中途 p 值提前停止。检验只回答 FBCSP 相对随机标签
+是否显著，**不检验 FBCSP 是否显著优于 CSP**。全局置换要求试次标签可交换；
+存在 run/session 或时间依赖时应另行设计受限置换，当前入口不提供该模式。
+本检验也不声称 ICA、人工审核等上游预处理在 CV 折内拟合。
 
 ---
 
@@ -875,6 +993,10 @@ python EEG_processing.py
 | Epoch 数量少于预期 | 事件越界，或完整 `-1～4 s` 窗口碰到坏段/接缝 | 查看 `stage4_epoch_report.json` 的拒绝原因，不要直接恢复被拒绝 Epoch |
 | HDF5 与报告哈希不一致 | 发布过程中中断、文件被外部修改或并发运行 | 停止其他进程，删除/隔离不一致输出后重新运行阶段 4 |
 | `ws.py` 无法读取 | 缺少 `clean_eeg`、`labels`，或形状/标签数量不一致 | 使用阶段 4 的 ws 输出，并先运行 `validate_clean_hdf5` |
+| FBCSP 阶段 4 提示输出已存在 | `FBCSP_OVERWRITE=False` 的保护机制 | 输入和设置未变则跳过阶段 4；确需重做时审核路径并显式允许覆盖 |
+| FBCSP 置换提示缺少 `--observed` | CLI 必填参数未提供 | 指向新分类的 `classification_result.json`，先加 `--validate-only` 核验 |
+| 分类/置换提示目录已存在 | 新实验拒绝复用已有输出目录 | 改用尚不存在的新目录；中断续跑使用 `--resume`，不要覆盖检查点 |
+| FBCSP 协议或文件哈希不匹配 | 混用了旧实验或发布后文件发生变化 | 重新分类并开始新置换，不修改协议标识绕过检查 |
 
 如果发布失败，优先查看终端异常和对应 JSON 凭据。不要把临时目录中的文件直接
 当作正式结果使用；阶段代码设计为验证成功后才替换配置中的正式路径。
@@ -888,7 +1010,9 @@ python EEG_processing.py
 ```bat
 :: 请先在项目根目录打开终端
 python -m unittest -v ^
-    EEG_preprocessing_test ICA_processing_test EEG_processing_test ws_test permutation_test_test grouped_search_test public_paths_test
+    EEG_preprocessing_test ICA_processing_test EEG_processing_test main_test ^
+    ws_test permutation_test grouped_search_test public_paths_test ^
+    fbcsp_test fbcsp_grouped_search_test fbcsp_stage4_test fbcsp_permutation_test
 ```
 
 也可以检查所有 Python 文件是否能编译：
@@ -933,7 +1057,7 @@ python processed_data_concatenation.py --overwrite
 - `ws.py` 的分类代码是独立消费端，默认只验证 clean HDF5 的基本结构，不替代
   阶段 4 的来源和审核报告校验。
 
-完成阶段 4 后，真正用于分类的最终文件是：
+完成原单频带阶段 4 后，真正用于分类的最终文件是：
 
 ```text
 cache/stage4_epochs_ws.hdf5
@@ -947,3 +1071,6 @@ reports/stage4_epoch_report.json
 
 二者应与阶段 3 的 `applied_components.json` 一起保存，才能完整追溯从原始数据
 到最终分类输入的处理过程。
+
+FBCSP 分支则使用 `cache/stage4_fbcsp_epochs_ws.hdf5` 及同源 baseline，
+配套 `reports/stage4_fbcsp_epoch_report.json`；不要与原单频带阶段 4 的文件混用。

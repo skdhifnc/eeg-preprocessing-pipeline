@@ -9,6 +9,7 @@
 /cache/
 /reports/
 /CSP_result/
+/FBCSP_result/
 /acquisition_desc.xml
 /asynchron_signal_types.xml
 *.fif
