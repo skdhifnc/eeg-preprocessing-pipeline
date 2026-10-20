@@ -47,7 +47,7 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def validate_config():
+def validate_config(*, validate_outputs=True):
     """验证配置之间的逻辑关系和路径安全，不限制具体导出规格。"""
     if Path(config.STAGE4_INPUT_RAW_PATH).resolve() != Path(config.ICA_CLEAN_RAW_PATH).resolve():
         raise ValueError("Stage 4 only accepts ICA_CLEAN_RAW_PATH, never a stage 2 fallback")
@@ -111,6 +111,8 @@ def validate_config():
     if not required_skip.issubset(skip):
         raise ValueError("Do not remove stage 4 filter boundary/bad annotation exclusions")
 
+    if not validate_outputs:
+        return  # FBCSP 复用处理设置校验，但有独立的输出契约和覆盖保护。
     outputs = output_paths()
     protected = {Path(p).resolve() for p in (
         config.STAGE4_INPUT_RAW_PATH, config.ICA_INPUT_RAW_PATH, config.ICA_MODEL_PATH,

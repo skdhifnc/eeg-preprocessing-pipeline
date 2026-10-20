@@ -52,12 +52,12 @@ class NestedCVTest(unittest.TestCase):
 
     def test_default_grid_and_low_channel_grid(self):
         grid = ws._search_grid(None, 32)
-        self.assertEqual(len(ParameterGrid(grid)), 72)
-        self.assertEqual(grid["csp__reg"], [0.05, 0.1, 0.2, 0.4, "ledoit_wolf", "oas"])
-        self.assertEqual(grid["csp__log"], [False, True])
+        self.assertEqual(len(ParameterGrid(grid)), 12)
+        self.assertEqual(grid["csp__reg"], [0.1, "ledoit_wolf"])
+        self.assertEqual(grid["csp__log"], [True])
         self.assertEqual(ws._search_grid(None, 2)["csp__n_components"], [2])
         grid["csp__reg"].clear()
-        self.assertEqual(len(ws.DEFAULT_PARAM_GRID["csp__reg"]), 6)
+        self.assertEqual(len(ws.DEFAULT_PARAM_GRID["csp__reg"]), 2)
 
     def test_real_default_ten_by_five_and_legacy_return(self):
         average, scores, details = self.run_cv(return_details=True)
@@ -114,10 +114,10 @@ class NestedCVTest(unittest.TestCase):
             self.assertEqual(fold["outer_score"], scores[fold_index])
             self.assertIn(fold["best_params"]["svm__C"], [0.1, 1.0])
 
-    def test_full_grid_all_shrinkage_log_and_component_options_fit(self):
-        # 小型合成数据实际跑完整默认 72 组、10x5 嵌套搜索（3610 次 fit）。
+    def test_full_current_grid_all_options_fit(self):
+        # 小型合成数据实际跑完整默认 12 组、10x5 原始搜索（610 次 fit）。
         average, scores, details = self.run_cv(param_grid=None, return_details=True)
-        self.assertEqual(details["n_candidates"], 72)
+        self.assertEqual(details["n_candidates"], 12)
         self.assertEqual(len(scores), 10)
         self.assertTrue(np.isfinite(average))
         for fold in details["folds"]:

@@ -27,9 +27,9 @@ PIPELINE_DEFAULTS = {"csp__n_components": 2, "csp__reg": "oas",
                      "csp__log": False, "csp__norm_trace": False,
                      "svm__kernel": "linear", "svm__C": 1.0}
 DEFAULT_PARAM_GRID = {
-    "csp__reg": [0.05, 0.1, 0.2, 0.4, "ledoit_wolf", "oas"],
+    "csp__reg": [0.1,"ledoit_wolf",],
     "csp__n_components": [2, 4],
-    "csp__log": [False, True],
+    "csp__log": [True],
     "svm__C": [0.1, 1.0, 10.0],
 }
 

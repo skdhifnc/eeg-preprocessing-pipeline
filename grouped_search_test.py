@@ -60,10 +60,11 @@ class GroupedSearchTest(unittest.TestCase):
 
         with patch.object(ws.CSP, "fit", tracked), use_log_level("ERROR"):
             ws.grouped_search(X, y, ws.DEFAULT_PARAM_GRID, inner_k_fold=3)
-        self.assertEqual(len(fits), 3 * 6 + 1)
+        n_regs = len(ws.DEFAULT_PARAM_GRID["csp__reg"])
+        self.assertEqual(len(fits), 3 * n_regs + 1)
         self.assertEqual(len({id(f[0]) for f in fits}), len(fits))
         for fold, (train, validation) in enumerate(StratifiedKFold(3).split(X, y)):
-            for _, received_X, received_y in fits[fold * 6:(fold + 1) * 6]:
+            for _, received_X, received_y in fits[fold * n_regs:(fold + 1) * n_regs]:
                 np.testing.assert_array_equal(received_X, X[train])
                 np.testing.assert_array_equal(received_y, y[train])
         np.testing.assert_array_equal(fits[-1][1], X)
@@ -80,7 +81,7 @@ class GroupedSearchTest(unittest.TestCase):
                                    param_grid=grid, return_details=True, search_engine="grouped")
         self.assertEqual(reference, grouped)
 
-    def test_full_ten_by_five_grid_has_310_csp_fits(self):
+    def test_full_ten_by_five_grid_has_expected_csp_fits(self):
         # 每类至少10个epoch，10x5合法；真正执行完整默认候选，不用mock替换算法。
         original = ws.CSP.fit
         count = []
@@ -91,7 +92,7 @@ class GroupedSearchTest(unittest.TestCase):
 
         with patch.object(ws.CSP, "fit", tracked), use_log_level("ERROR"), redirect_stdout(StringIO()):
             result = ws.nested_cv(self.data, self.labels, search_engine="grouped")
-        self.assertEqual(len(count), 310)
+        self.assertEqual(len(count), 10 * (5 * len(ws.DEFAULT_PARAM_GRID["csp__reg"]) + 1))
         self.assertEqual(len(result[1]), 10)
 
 
